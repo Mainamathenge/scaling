@@ -1,0 +1,9 @@
+/Users/mac/Documents/cmu/spring26/cloud/scalling/scaling/java/task2/src/main/java/autoscaling/Api.java
+/Users/mac/Documents/cmu/spring26/cloud/scalling/scaling/java/task2/src/main/java/utilities/HttpRequest.java
+/Users/mac/Documents/cmu/spring26/cloud/scalling/scaling/java/task2/src/main/java/autoscaling/ResourceConfig.java
+/Users/mac/Documents/cmu/spring26/cloud/scalling/scaling/java/task2/src/main/java/autoscaling/Ec2.java
+/Users/mac/Documents/cmu/spring26/cloud/scalling/scaling/java/task2/src/main/java/autoscaling/AutoScale.java
+/Users/mac/Documents/cmu/spring26/cloud/scalling/scaling/java/task2/src/main/java/utilities/Configuration.java
+/Users/mac/Documents/cmu/spring26/cloud/scalling/scaling/java/task2/src/main/java/autoscaling/Cloudwatch.java
+/Users/mac/Documents/cmu/spring26/cloud/scalling/scaling/java/task2/src/main/java/autoscaling/Aas.java
+/Users/mac/Documents/cmu/spring26/cloud/scalling/scaling/java/task2/src/main/java/autoscaling/Elb.java

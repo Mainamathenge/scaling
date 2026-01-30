@@ -1,14 +1,44 @@
 package autoscaling;
 
+import lombok.extern.slf4j.Slf4j;
 import software.amazon.awssdk.services.cloudwatch.CloudWatchClient;
+import software.amazon.awssdk.services.cloudwatch.model.ComparisonOperator;
+import software.amazon.awssdk.services.cloudwatch.model.DeleteAlarmsRequest;
+import software.amazon.awssdk.services.cloudwatch.model.Dimension;
+import software.amazon.awssdk.services.cloudwatch.model.PutMetricAlarmRequest;
+import software.amazon.awssdk.services.cloudwatch.model.Statistic;
 
+import static autoscaling.AutoScale.AUTO_SCALING_GROUP_NAME;
 import static autoscaling.AutoScale.configuration;
 
 
 /**
  * CloudWatch resources.
  */
+@Slf4j
 public final class Cloudwatch {
+
+    /**
+     * High CPU alarm name.
+     */
+    private static final String HIGH_CPU_ALARM_NAME =
+            AUTO_SCALING_GROUP_NAME + "-high-cpu-alarm";
+
+    /**
+     * Low CPU alarm name.
+     */
+    private static final String LOW_CPU_ALARM_NAME =
+            AUTO_SCALING_GROUP_NAME + "-low-cpu-alarm";
+
+    /**
+     * CPU metric namespace.
+     */
+    private static final String METRIC_NAMESPACE = "AWS/EC2";
+
+    /**
+     * CPU metric name.
+     */
+    private static final String METRIC_NAME = "CPUUtilization";
     /**
      * Sixty seconds.
      */
@@ -53,8 +83,25 @@ public final class Cloudwatch {
      */
     public static void createScaleOutAlarm(final CloudWatchClient cloudWatch,
                                            final String policyArn) {
-        // TODO: Create Scale Out Alarm
-        throw new UnsupportedOperationException("Not yet implemented.");
+        PutMetricAlarmRequest highCpuAlarmRequest = PutMetricAlarmRequest.builder()
+                .alarmName(HIGH_CPU_ALARM_NAME)
+                .alarmDescription("Trigger scale-out when CPU is high")
+                .metricName(METRIC_NAME)
+                .namespace(METRIC_NAMESPACE)
+                .statistic(Statistic.AVERAGE)
+                .period(ALARM_PERIOD)
+                .evaluationPeriods(ALARM_EVALUATION_PERIODS_SCALE_OUT)
+                .threshold(CPU_UPPER_THRESHOLD)
+                .comparisonOperator(ComparisonOperator.GREATER_THAN_THRESHOLD)
+                .dimensions(Dimension.builder()
+                        .name("AutoScalingGroupName")
+                        .value(AUTO_SCALING_GROUP_NAME)
+                        .build())
+                .alarmActions(policyArn)
+                .build();
+
+        cloudWatch.putMetricAlarm(highCpuAlarmRequest);
+        log.info("High CPU alarm created: {}", HIGH_CPU_ALARM_NAME);
     }
 
     /**
@@ -65,8 +112,25 @@ public final class Cloudwatch {
      */
     public static void createScaleInAlarm(final CloudWatchClient cloudWatch,
                                           final String policyArn) {
-        // TODO: Create Scale In Alarm
-        throw new UnsupportedOperationException("Not yet implemented.");
+        PutMetricAlarmRequest lowCpuAlarmRequest = PutMetricAlarmRequest.builder()
+                .alarmName(LOW_CPU_ALARM_NAME)
+                .alarmDescription("Trigger scale-in when CPU is low")
+                .metricName(METRIC_NAME)
+                .namespace(METRIC_NAMESPACE)
+                .statistic(Statistic.AVERAGE)
+                .period(ALARM_PERIOD)
+                .evaluationPeriods(ALARM_EVALUATION_PERIODS_SCALE_IN)
+                .threshold(CPU_LOWER_THRESHOLD)
+                .comparisonOperator(ComparisonOperator.LESS_THAN_THRESHOLD)
+                .dimensions(Dimension.builder()
+                        .name("AutoScalingGroupName")
+                        .value(AUTO_SCALING_GROUP_NAME)
+                        .build())
+                .alarmActions(policyArn)
+                .build();
+
+        cloudWatch.putMetricAlarm(lowCpuAlarmRequest);
+        log.info("Low CPU alarm created: {}", LOW_CPU_ALARM_NAME);
     }
 
     /**
@@ -75,7 +139,11 @@ public final class Cloudwatch {
      * @param cloudWatch cloud watch client
      */
     public static void deleteAlarms(final CloudWatchClient cloudWatch) {
-        // TODO: Delete two created Alarms
-        throw new UnsupportedOperationException("Not yet implemented.");
+        DeleteAlarmsRequest deleteAlarmsRequest = DeleteAlarmsRequest.builder()
+                .alarmNames(HIGH_CPU_ALARM_NAME, LOW_CPU_ALARM_NAME)
+                .build();
+
+        cloudWatch.deleteAlarms(deleteAlarmsRequest);
+        log.info("Deleted alarms: {}, {}", HIGH_CPU_ALARM_NAME, LOW_CPU_ALARM_NAME);
     }
 }

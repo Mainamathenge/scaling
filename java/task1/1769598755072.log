@@ -1,0 +1,113 @@
+; 2026-01-28T11:12:35+00:00
+; Horizontal Scaling Test
+; isTestingThroughCode=true
+; Test launched. Please check every minute for update.
+; Your goal is to achieve rps=50 in 30 min
+; Minimal interval of adding instances is 100 sec
+[Test]
+type=horizontal
+testId=1769598755072
+testFile=test.1769598755072.log
+startTime=2026-01-28T11:12:35+00:00
+
+[Minute 1]
+ec2-34-230-84-97.compute-1.amazonaws.com=13.56
+[Current rps=13.56]
+
+[Minute 2]
+ec2-34-230-84-97.compute-1.amazonaws.com=10.33
+[Current rps=10.33]
+
+[Minute 3]
+ec2-34-230-84-97.compute-1.amazonaws.com=8.85
+ec2-23-22-201-44.compute-1.amazonaws.com=12.95
+[Current rps=21.80]
+
+[Minute 4]
+ec2-34-230-84-97.compute-1.amazonaws.com=11.63
+ec2-23-22-201-44.compute-1.amazonaws.com=13.25
+[Current rps=24.88]
+
+[Minute 5]
+ec2-34-230-84-97.compute-1.amazonaws.com=10.81
+ec2-23-22-201-44.compute-1.amazonaws.com=11.80
+ec2-98-89-22-222.compute-1.amazonaws.com=13.88
+[Current rps=36.49]
+
+[Minute 6]
+ec2-34-230-84-97.compute-1.amazonaws.com=10.66
+ec2-23-22-201-44.compute-1.amazonaws.com=12.88
+ec2-98-89-22-222.compute-1.amazonaws.com=13.60
+[Current rps=37.14]
+
+[Minute 7]
+ec2-34-230-84-97.compute-1.amazonaws.com=13.03
+ec2-23-22-201-44.compute-1.amazonaws.com=12.18
+ec2-98-89-22-222.compute-1.amazonaws.com=12.16
+ec2-100-31-105-81.compute-1.amazonaws.com=10.71
+[Current rps=48.08]
+
+[Minute 8]
+ec2-34-230-84-97.compute-1.amazonaws.com=11.75
+ec2-23-22-201-44.compute-1.amazonaws.com=9.61
+ec2-98-89-22-222.compute-1.amazonaws.com=11.98
+ec2-100-31-105-81.compute-1.amazonaws.com=11.81
+[Current rps=45.15]
+
+[Minute 9]
+ec2-34-230-84-97.compute-1.amazonaws.com=12.13
+ec2-23-22-201-44.compute-1.amazonaws.com=13.50
+ec2-98-89-22-222.compute-1.amazonaws.com=13.08
+ec2-100-31-105-81.compute-1.amazonaws.com=11.95
+ec2-35-172-200-252.compute-1.amazonaws.com=12.93
+[Current rps=63.59]
+
+[Load Generator]
+username=null
+platform=AWS
+instanceId=i-0f21c9829e7020800
+instanceType=m5.large
+hostname=ec2-184-72-84-139.compute-1.amazonaws.com
+passwd=
+
+[Web Service 0]
+username=null
+platform=AWS
+instanceId=i-085db06c51375396f
+instanceType=m5.large
+hostname=ec2-34-230-84-97.compute-1.amazonaws.com
+
+[Web Service 1]
+username=null
+platform=AWS
+instanceId=i-081ee46aa73ed9431
+instanceType=m5.large
+hostname=ec2-23-22-201-44.compute-1.amazonaws.com
+
+[Web Service 2]
+username=null
+platform=AWS
+instanceId=i-0d56bd2467ee66097
+instanceType=m5.large
+hostname=ec2-98-89-22-222.compute-1.amazonaws.com
+
+[Web Service 3]
+username=null
+platform=AWS
+instanceId=i-02ab9ef5127c34c01
+instanceType=m5.large
+hostname=ec2-100-31-105-81.compute-1.amazonaws.com
+
+[Web Service 4]
+username=null
+platform=AWS
+instanceId=i-0704fb7226fe64e0c
+instanceType=m5.large
+hostname=ec2-35-172-200-252.compute-1.amazonaws.com
+
+; MSB is validating....
+[Test End]
+endTime=2026-01-28T11:21:38+00:00
+rps=63.59
+pass=true
+[Test finished]

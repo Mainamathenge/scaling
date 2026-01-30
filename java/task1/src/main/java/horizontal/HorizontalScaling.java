@@ -7,24 +7,25 @@ import java.util.Date;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.io.FileUtils;
 import org.ini4j.Ini;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import software.amazon.awssdk.services.ec2.model.*;
 import utilities.Configuration;
 import utilities.HttpRequest;
 
 import software.amazon.awssdk.auth.credentials.AwsCredentialsProvider;
 import software.amazon.awssdk.auth.credentials.DefaultCredentialsProvider;
 import software.amazon.awssdk.services.ec2.Ec2Client;
-import software.amazon.awssdk.services.ec2.model.Instance;
-import software.amazon.awssdk.services.ec2.model.Vpc;
 import software.amazon.awssdk.regions.Region;
 
 
 /**
  * Class for Task1 Solution.
  */
+@Slf4j
 public final class HorizontalScaling {
     /**
      * Project Tag value.
@@ -42,7 +43,7 @@ public final class HorizontalScaling {
      */
     private static final String LOAD_GENERATOR =
             CONFIGURATION.getString("load_generator_ami");
-    
+
     /**
      * Web Service AMI.
      */
@@ -111,7 +112,7 @@ public final class HorizontalScaling {
         //  - Provision a Load Generator instance
         //  - Provision a Web Service instance
         //  - Register Web Service DNS with Load Generator
-        //  - Add Web Service instances to Load Generator 
+        //  - Add Web Service instances to Load Generator
         //  - Terminate resources
 
         AwsCredentialsProvider credentialsProvider =
@@ -127,18 +128,98 @@ public final class HorizontalScaling {
         Vpc vpc = getDefaultVPC(ec2);
 
         // Create Security Groups in the default VPC
-        String lgSecurityGroupId =
-                getOrCreateHttpSecurityGroup(ec2, LG_SECURITY_GROUP, vpc.vpcId());
-        String wsSecurityGroupId =
-                getOrCreateHttpSecurityGroup(ec2, WEB_SERVICE_SECURITY_GROUP, vpc.vpcId());
+        String lgSecurityGroupId = getOrCreateHttpSecurityGroup(ec2, LG_SECURITY_GROUP, vpc.vpcId());
+        String wsSecurityGroupId = getOrCreateHttpSecurityGroup(ec2, WEB_SERVICE_SECURITY_GROUP, vpc.vpcId());
 
-        // TODO: Create Load Generator instance and obtain DNS
-        // TODO: Tag instance using Tag Specification
-        String loadGeneratorDNS = "";
+        TagSpecification tagSpecification = TagSpecification.builder()
+                .resourceType(ResourceType.INSTANCE)
+                .tags(
+                        Tag.builder()
+                                .key("Name")
+                                .value("LOAD_GENERATOR")
+                                .build(),
+                        Tag.builder()
+                                .key("project")
+                                .value(PROJECT_VALUE)
+                                .build()
+                )
+                .build();
+        RunInstancesRequest runRequest = RunInstancesRequest.builder()
+                .imageId(LOAD_GENERATOR)
+                .instanceType(INSTANCE_TYPE)
+                .minCount(1)
+                .maxCount(1)
+                .securityGroupIds(lgSecurityGroupId)
+                .tagSpecifications(tagSpecification)
+                .build();
 
-        // TODO: Create first Web Service instance and obtain DNS
-        // TODO: Tag instance using Tag Specification
-        String webServiceDNS = "";
+        RunInstancesResponse runResponse = ec2.runInstances(runRequest);
+
+        String loadGenInstanceId = runResponse.instances().get(0).instanceId();
+        log.info("Load generation instance ID: {}", loadGenInstanceId);
+
+        DescribeInstancesRequest describeRequest = DescribeInstancesRequest.builder()
+                .instanceIds(loadGenInstanceId)
+                .build();
+        Instance loadGeneratorInstance = null;
+        while (loadGeneratorInstance == null || !loadGeneratorInstance.state().name().equals(InstanceStateName.RUNNING)) {
+            Thread.sleep(5000);
+            DescribeInstancesResponse describeResponse = ec2.describeInstances(describeRequest);
+            loadGeneratorInstance = describeResponse.reservations()
+                    .get(0)
+                    .instances()
+                    .get(0);
+            log.info("Load generation instance ID: {}", loadGeneratorInstance.instanceId());
+        }
+        String loadGeneratorDNS = loadGeneratorInstance.publicDnsName();
+
+        TagSpecification wsTagSpecification = TagSpecification.builder()
+                .resourceType(ResourceType.INSTANCE)
+                .tags(
+                        Tag.builder()
+                                .key("Name")
+                                .value("Web Service")
+                                .build(),
+                        Tag.builder()
+                                .key("project")
+                                .value(PROJECT_VALUE)
+                                .build()
+                )
+                .build();
+
+        RunInstancesRequest wsRunRequest = RunInstancesRequest.builder()
+                .imageId(WEB_SERVICE)
+                .instanceType(INSTANCE_TYPE)
+                .minCount(1)
+                .maxCount(1)
+                .securityGroupIds(wsSecurityGroupId)
+                .tagSpecifications(wsTagSpecification)
+                .build();
+
+        RunInstancesResponse wsRunResponse = ec2.runInstances(wsRunRequest);
+        String webServiceInstanceId = wsRunResponse.instances().get(0).instanceId();
+        log.info("Web Service instance launched with ID: {}", webServiceInstanceId);
+
+
+        DescribeInstancesRequest wsDescribeRequest = DescribeInstancesRequest.builder()
+                .instanceIds(webServiceInstanceId)
+                .build();
+
+        Instance webServiceInstance = null;
+        while (webServiceInstance == null ||
+                !webServiceInstance.state().name().equals(InstanceStateName.RUNNING)) {
+
+            Thread.sleep(5000);
+
+            DescribeInstancesResponse wsDescribeResponse = ec2.describeInstances(wsDescribeRequest);
+            webServiceInstance = wsDescribeResponse.reservations()
+                    .get(0)
+                    .instances()
+                    .get(0);
+
+            log.info("Web Service instance state: {} ", webServiceInstance.state().name());
+        }
+        String webServiceDNS = webServiceInstance.publicDnsName();
 
         //Initialize test
         String response = initializeTest(loadGeneratorDNS, webServiceDNS);
@@ -153,11 +234,59 @@ public final class HorizontalScaling {
         Ini ini = getIniUpdate(loadGeneratorDNS, testId);
         while (ini == null || !ini.containsKey("Test finished")) {
             ini = getIniUpdate(loadGeneratorDNS, testId);
+            if (ini != null) {
+                float currentRPS = getRPS(ini);
+                log.info("Current RPS:{} " , currentRPS);
+                Date currentTime = new Date();
+                long timeSinceLastLaunch = currentTime.getTime() - lastLaunchTime.getTime();
+                if (currentRPS < RPS_TARGET && timeSinceLastLaunch >= LAUNCH_DELAY) {
+                    TagSpecification newWsTagSpec = TagSpecification.builder()
+                            .resourceType(ResourceType.INSTANCE)
+                            .tags(
+                                    Tag.builder().key("Name").value("Web Service").build(),
+                                    Tag.builder().key("project").value(PROJECT_VALUE).build()
+                            )
+                            .build();
+                    RunInstancesRequest newWsRequest = RunInstancesRequest.builder()
+                            .imageId(WEB_SERVICE)
+                            .instanceType(INSTANCE_TYPE)
+                            .minCount(1)
+                            .maxCount(1)
+                            .securityGroupIds(wsSecurityGroupId)
+                            .tagSpecifications(newWsTagSpec)
+                            .build();
 
-            // TODO: Check last launch time and RPS
-            // TODO: Add New Web Service Instance if Required
+                    RunInstancesResponse newWsResponse = ec2.runInstances(newWsRequest);
+                    String newWsInstanceId = newWsResponse.instances().get(0).instanceId();
+                    log.info("Adding one instance:{} " ,newWsInstanceId);
+
+                    DescribeInstancesRequest newWsDescribeRequest = DescribeInstancesRequest.builder()
+                            .instanceIds(newWsInstanceId)
+                            .build();
+
+                    Instance newWsInstance = null;
+                    while (newWsInstance == null ||
+                            !newWsInstance.state().name().equals(InstanceStateName.RUNNING)) {
+
+                        Thread.sleep(5000);
+
+                        DescribeInstancesResponse newWsDescribeResponse =
+                                ec2.describeInstances(newWsDescribeRequest);
+                        newWsInstance = newWsDescribeResponse.reservations()
+                                .get(0)
+                                .instances()
+                                .get(0);
+
+                        log.info("New Web Service state: {}" ,newWsInstance.state().name());
+                    }
+                    String newWebServiceDNS = newWsInstance.publicDnsName();
+                    String addResponse = addWebServiceInstance(loadGeneratorDNS, newWebServiceDNS, testId);
+                    lastLaunchTime = new Date();
+                }
+            }
+            Thread.sleep(1000);
         }
-
+        log.info("Load testing completed");
     }
 
     /**
@@ -228,10 +357,13 @@ public final class HorizontalScaling {
                         "http://%s/test/horizontal?dns=%s",
                         loadGeneratorDNS,
                         webServiceDNS));
-                logger.info(response);
                 launchWebServiceSuccess = true;
             } catch (Exception e) {
-                // Retry until the instances are up and running
+                try {
+                    Thread.sleep(RETRY_DELAY_MILLIS);
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                }
             }
         }
         return response;
@@ -256,7 +388,6 @@ public final class HorizontalScaling {
                         "http://%s/test/horizontal/add?dns=%s",
                         loadGeneratorDNS,
                         webServiceDNS));
-                logger.info(response);
                 launchWebServiceSuccess = true;
             } catch (Exception e) {
                 try {
@@ -264,7 +395,7 @@ public final class HorizontalScaling {
                     Ini ini = getIniUpdate(loadGeneratorDNS, testId);
                     if (ini.containsKey("Test finished")) {
                         launchWebServiceSuccess = true;
-                        logger.info("New WS is not added because the test already completed");
+                        log.info("New WS is not added because the test already completed");
                     }
                 } catch (Exception e1) {
                     e1.printStackTrace();
@@ -293,6 +424,14 @@ public final class HorizontalScaling {
     public static Vpc getDefaultVPC(final Ec2Client ec2) {
         //TODO: Remove the exception
         //TODO: Get the default VPC
+        DescribeVpcsRequest request = DescribeVpcsRequest.builder().build();
+        DescribeVpcsResponse response = ec2.describeVpcs(request);
+        for (Vpc vpc : response.vpcs()) {
+            if (vpc.isDefault() != null && vpc.isDefault()) {
+                log.info("Found default VPC: {} " ,vpc.vpcId());
+                return vpc;
+            }
+        }
         throw new UnsupportedOperationException();
     }
 
@@ -307,10 +446,55 @@ public final class HorizontalScaling {
     public static String getOrCreateHttpSecurityGroup(final Ec2Client ec2,
                                                       final String securityGroupName,
                                                       final String vpcId) {
-        //TODO: Remove the exception
-        //TODO: Get or create Security Group
-        //TODO: Allow all HTTP inbound traffic for the security group
-        throw new UnsupportedOperationException();
+        DescribeSecurityGroupsRequest describeRequest = DescribeSecurityGroupsRequest.builder()
+                .filters(Filter.builder()
+                                .name("group-name")
+                                .values(securityGroupName)
+                                .build(),
+                        Filter.builder()
+                                .name("vpc-id")
+                                .values(vpcId)
+                                .build())
+                .build();
+
+        try {
+            DescribeSecurityGroupsResponse describeResponse = ec2.describeSecurityGroups(describeRequest);
+
+            if (!describeResponse.securityGroups().isEmpty()) {
+                String groupId = describeResponse.securityGroups().get(0).groupId();
+                System.out.println("Found existing security group: " + groupId);
+                return groupId;
+            }
+        } catch (Ec2Exception e) {
+            System.out.println("Error checking for existing security group: " + e.getMessage());
+        }
+
+        CreateSecurityGroupRequest createRequest = CreateSecurityGroupRequest.builder()
+                .groupName(securityGroupName)
+                .description("Security group for HTTP traffic")
+                .vpcId(vpcId)
+                .build();
+
+        CreateSecurityGroupResponse createResponse = ec2.createSecurityGroup(createRequest);
+        String groupId = createResponse.groupId();
+        System.out.println("Created new security group: " + groupId);
+
+        IpPermission ipPermission = IpPermission.builder()
+                .ipProtocol("tcp")
+                .fromPort(80)
+                .toPort(80)
+                .ipRanges(IpRange.builder().cidrIp("0.0.0.0/0").build())
+                .build();
+
+        AuthorizeSecurityGroupIngressRequest ingressRequest = AuthorizeSecurityGroupIngressRequest.builder()
+                .groupId(groupId)
+                .ipPermissions(ipPermission)
+                .build();
+
+        ec2.authorizeSecurityGroupIngress(ingressRequest);
+        System.out.println("Added HTTP inbound rule to security group");
+
+        return groupId;
     }
 
     /**
@@ -322,8 +506,17 @@ public final class HorizontalScaling {
      */
     public static Instance getInstance(final Ec2Client ec2,
                                        final String instanceId) {
-        //TODO: Remove the exception
-        //TODO: Get an Ec2 instance
-        throw new UnsupportedOperationException();
+        DescribeInstancesRequest request = DescribeInstancesRequest.builder()
+                .instanceIds(instanceId)
+                .build();
+
+        DescribeInstancesResponse response = ec2.describeInstances(request);
+
+        if (!response.reservations().isEmpty() &&
+                !response.reservations().get(0).instances().isEmpty()) {
+            return response.reservations().get(0).instances().get(0);
+        }
+
+        throw new IllegalArgumentException("Instance not found: " + instanceId);
     }
 }

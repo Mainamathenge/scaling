@@ -1,0 +1,9 @@
+autoscaling/Aas.class
+autoscaling/Cloudwatch.class
+autoscaling/Ec2.class
+utilities/HttpRequest.class
+autoscaling/Elb.class
+autoscaling/Api.class
+autoscaling/AutoScale.class
+utilities/Configuration.class
+autoscaling/ResourceConfig.class

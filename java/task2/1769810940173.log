@@ -1,0 +1,37 @@
+; MSB AutoScaling Test
+
+; Test launched. Please check every minute for update.
+[Test Start]
+time=2026-01-30 22:09:00
+type=autoscaling
+testId=1769810940173
+testFile=test.1769810940173.log
+
+
+[Minute 1]
+rps=18.90
+
+[Minute 2]
+rps=20.02
+
+[Minute 3]
+rps=4.00
+
+[Minute 4]
+rps=4.02
+
+[Minute 5]
+rps=4.02
+
+[Minute 6]
+rps=12.02
+
+[Minute 7]
+rps=20.00
+
+[Minute 8]
+rps=20.02
+
+[Minute 9]
+rps=6.43
+

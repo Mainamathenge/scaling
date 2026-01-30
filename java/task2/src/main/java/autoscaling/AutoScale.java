@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.util.Arrays;
 import java.util.List;
 
+import lombok.extern.slf4j.Slf4j;
 import org.ini4j.Ini;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -16,7 +17,12 @@ import software.amazon.awssdk.services.cloudwatch.CloudWatchClient;
 import software.amazon.awssdk.services.ec2.Ec2Client;
 import software.amazon.awssdk.services.ec2.model.Instance;
 import software.amazon.awssdk.services.ec2.model.Tag;
+import software.amazon.awssdk.services.ec2.model.TagSpecification;
+import software.amazon.awssdk.services.ec2.model.ResourceType;
+import software.amazon.awssdk.services.ec2.model.Vpc;
 import software.amazon.awssdk.services.elasticloadbalancingv2.ElasticLoadBalancingV2Client;
+import software.amazon.awssdk.services.elasticloadbalancingv2.model.LoadBalancer;
+import software.amazon.awssdk.services.elasticloadbalancingv2.model.TargetGroup;
 
 import utilities.Configuration;
 
@@ -24,6 +30,7 @@ import utilities.Configuration;
 /**
  * Main AutoScaling Task class.
  */
+@Slf4j
 public final class AutoScale {
     /**
      * Configuration file
@@ -199,11 +206,17 @@ public final class AutoScale {
         //   - Initialize Warmup Test
         //   - Initialize Autoscaling Test
         //   - Terminate Resources
-        ResourceConfig resourceConfig = initializeResources(ec2, aas, elb, cloudWatch);
-        resourceConfig = initializeTestResources(ec2, resourceConfig);
-
-        executeTest(resourceConfig);
-        destroy(ec2, aas, elb, cloudWatch, resourceConfig);
+        ResourceConfig resourceConfig = null;
+        try {
+            resourceConfig = initializeResources(ec2, aas, elb, cloudWatch);
+            resourceConfig = initializeTestResources(ec2, resourceConfig);
+            executeTest(resourceConfig);
+        } finally {
+            // Always cleanup resources, even if test fails
+            if (resourceConfig != null) {
+                destroy(ec2, aas, elb, cloudWatch, resourceConfig);
+            }
+        }
     }
 
     /**
@@ -219,12 +232,35 @@ public final class AutoScale {
                                                       final AutoScalingClient aas,
                                                       final ElasticLoadBalancingV2Client elb,
                                                       final CloudWatchClient cloudWatch) {
-        // TODO: Create a Load Balancer and a Target Group
-        // TODO: Create an Auto Scaling Group and attach a Launch Template
-        
-        String targetGroupArn = null;
-        String loadBalancerDNS = null;
-        String loadBalancerArn = null;
+        // Step 1: Get the default VPC
+        Vpc defaultVpc = Ec2.getDefaultVPC(ec2);
+        String vpcId = defaultVpc.vpcId();
+        log.info("Using VPC: {}", vpcId);
+
+        // Step 2: Create security group for ELB and ASG
+        String elbAsgSecurityGroupId = Ec2.getOrCreateHttpSecurityGroup(
+                ec2, ELBASG_SECURITY_GROUP, vpcId);
+        log.info("ELB/ASG Security Group ID: {}", elbAsgSecurityGroupId);
+
+        // Step 3: Create launch template for ASG instances
+        Ec2.createLaunchTemplate(ec2);
+        log.info("Launch Template created: {}", LAUNCH_TEMPLATE_NAME);
+
+        // Step 4: Create target group
+        TargetGroup targetGroup = Elb.createTargetGroup(elb, ec2);
+        String targetGroupArn = targetGroup.targetGroupArn();
+        log.info("Target Group ARN: {}", targetGroupArn);
+
+        // Step 5: Create load balancer with listener
+        LoadBalancer loadBalancer = Elb.createLoadBalancer(
+                elb, ec2, elbAsgSecurityGroupId, targetGroupArn);
+        String loadBalancerDNS = loadBalancer.dnsName();
+        String loadBalancerArn = loadBalancer.loadBalancerArn();
+        log.info("Load Balancer DNS: {}", loadBalancerDNS);
+
+        // Step 6: Create Auto Scaling Group with CloudWatch alarms
+        Aas.createAutoScalingGroup(aas, cloudWatch, ec2, targetGroupArn);
+        log.info("Auto Scaling Group created: {}", AUTO_SCALING_GROUP_NAME);
 
         ResourceConfig resourceConfig = new ResourceConfig();
         resourceConfig.setTargetGroupArn(targetGroupArn);
@@ -242,12 +278,34 @@ public final class AutoScale {
      */
     public static ResourceConfig initializeTestResources(final Ec2Client ec2,
                                                          final ResourceConfig config) throws InterruptedException {
-        // TODO: Create a Load Generator Instance
-        Instance loadGenerator = null;
-        
+        // Get the default VPC for security group creation
+        Vpc defaultVpc = Ec2.getDefaultVPC(ec2);
+        String vpcId = defaultVpc.vpcId();
+
+        // Create security group for Load Generator
+        String lgSecurityGroupId = Ec2.getOrCreateHttpSecurityGroup(
+                ec2, LG_SECURITY_GROUP, vpcId);
+        log.info("Load Generator Security Group ID: {}", lgSecurityGroupId);
+
+        // Create tag specification for Load Generator
+        TagSpecification lgTagSpec = TagSpecification.builder()
+                .resourceType(ResourceType.INSTANCE)
+                .tags(LG_TAGS_LIST)
+                .build();
+
+        // Launch Load Generator instance
+        Instance loadGenerator = Ec2.launchInstance(
+                ec2,
+                lgTagSpec,
+                LOAD_GENERATOR_AMI_ID,
+                INSTANCE_TYPE,
+                lgSecurityGroupId,
+                false);
+        log.info("Load Generator launched: {}", loadGenerator.instanceId());
+
         config.setLoadGeneratorDns(loadGenerator.publicDnsName());
         config.setLoadGeneratorID(loadGenerator.instanceId());
-        
+
         return config;
     }
 
@@ -269,7 +327,7 @@ public final class AutoScale {
                 testStarted = true;
             } catch (Exception e) {
                 // Ignore errors
-                LOG.error("*");
+                log.error("*");
             }
         }
 
@@ -337,7 +395,85 @@ public final class AutoScale {
                                final ElasticLoadBalancingV2Client elb,
                                final CloudWatchClient cloudWatch,
                                final ResourceConfig resourceConfig) {
-        // TODO: Destroy resources in an appropriate order
-        throw new UnsupportedOperationException("Not yet implemented.");
+        LOG.info("Starting resource cleanup...");
+
+        // Step 1: Delete CloudWatch alarms
+        try {
+            Cloudwatch.deleteAlarms(cloudWatch);
+            LOG.info("CloudWatch alarms deleted");
+        } catch (Exception e) {
+            LOG.error("Error deleting CloudWatch alarms: {}", e.getMessage());
+        }
+
+        // Step 2: Delete Auto Scaling Group (this terminates ASG instances)
+        try {
+            Aas.terminateAutoScalingGroup(aas);
+            LOG.info("Auto Scaling Group terminated");
+        } catch (Exception e) {
+            LOG.error("Error terminating Auto Scaling Group: {}", e.getMessage());
+        }
+
+        // Step 3: Delete Load Balancer
+        try {
+            Elb.deleteLoadBalancer(elb, resourceConfig.getLoadBalancerArn());
+            LOG.info("Load Balancer deleted");
+        } catch (Exception e) {
+            LOG.error("Error deleting Load Balancer: {}", e.getMessage());
+        }
+
+        // Wait for Load Balancer to be fully deleted before deleting Target Group
+        try {
+            Thread.sleep(30000);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+
+        // Step 4: Delete Target Group
+        try {
+            Elb.deleteTargetGroup(elb, resourceConfig.getTargetGroupArn());
+            LOG.info("Target Group deleted");
+        } catch (Exception e) {
+            LOG.error("Error deleting Target Group: {}", e.getMessage());
+        }
+
+        // Step 5: Delete Launch Template
+        try {
+            Ec2.deleteLaunchTemplate(ec2);
+            LOG.info("Launch Template deleted");
+        } catch (Exception e) {
+            LOG.error("Error deleting Launch Template: {}", e.getMessage());
+        }
+
+        // Step 6: Terminate Load Generator instance
+        try {
+            Ec2.terminateInstance(ec2, resourceConfig.getLoadGeneratorID());
+            LOG.info("Load Generator terminated");
+        } catch (Exception e) {
+            LOG.error("Error terminating Load Generator: {}", e.getMessage());
+        }
+
+        // Wait for instances to terminate before deleting security groups
+        try {
+            Thread.sleep(60000);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+
+        // Step 7: Delete Security Groups
+        try {
+            Ec2.deleteSecurityGroup(ec2, ELBASG_SECURITY_GROUP);
+            LOG.info("ELB/ASG Security Group deleted");
+        } catch (Exception e) {
+            LOG.error("Error deleting ELB/ASG Security Group: {}", e.getMessage());
+        }
+
+        try {
+            Ec2.deleteSecurityGroup(ec2, LG_SECURITY_GROUP);
+            LOG.info("Load Generator Security Group deleted");
+        } catch (Exception e) {
+            LOG.error("Error deleting Load Generator Security Group: {}", e.getMessage());
+        }
+
+        LOG.info("Resource cleanup completed");
     }
 }

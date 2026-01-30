@@ -1,0 +1,50 @@
+; 2026-01-30T21:17:52+00:00
+; Warmup Test
+; Test launched. Please check every minute for update, for 15 minutes
+[Test]
+type=warmup
+testId=1769807872141
+testFile=test.1769807872141.log
+
+[Minute 1]
+rps=12.53
+
+[Minute 2]
+rps=0
+
+[Minute 3]
+rps=0
+
+[Minute 4]
+rps=8.06
+
+[Minute 5]
+rps=0
+
+[Minute 6]
+rps=0
+
+[Minute 7]
+rps=12.21
+
+[Minute 8]
+rps=0
+
+[Minute 9]
+rps=22.11
+
+[Minute 10]
+rps=0
+
+[Minute 11]
+rps=18.25
+
+[Minute 12]
+rps=0
+
+[Minute 13]
+rps=28.30
+
+[Minute 14]
+rps=0
+
